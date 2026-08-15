@@ -1,86 +1,170 @@
-# Local DeepFilterNet Audio Enhancer
+# D-Noiser
 
-A small local FastAPI + Jinja2 application for batch-enhancing audio with DeepFilterNet.
+A simple local audio denoising application powered by **DeepFilterNet3**.
 
-## What it does
+D-Noiser lets you clean up audio files directly on your machine without uploading your recordings to a cloud service.
 
-1. Enter a local folder path in the web UI.
-2. The backend scans that folder for supported audio files.
-3. DeepFilterNet is loaded once and reused for the batch.
-4. Each file is enhanced locally.
-5. Results are written as WAV files into a sibling folder named `<source>_enhanced`.
+## Features
 
-Example:
+* 🎙️ Denoise individual audio files
+* 📁 Denoise an entire folder of audio files
+* 💾 Choose the exact output location and filename for individual files
+* 📂 Automatically create an enhanced output folder when processing a directory
+* 🔒 Runs locally — your audio stays on your machine
+* ⚡ Uses DeepFilterNet3 for real-time speech enhancement
+* 🌐 Simple local web interface built with FastAPI and Jinja2
+
+## How it works
+
+D-Noiser uses DeepFilterNet3 as the underlying speech enhancement model.
+
+For supported audio files, the application:
+
+1. Converts the input audio to the format required by DeepFilterNet.
+2. Runs the audio through DeepFilterNet3.
+3. Saves the enhanced audio to the location you specify.
+
+For folder processing, D-Noiser automatically creates an `_enhanced` folder next to the original folder.
+
+### Example
 
 ```text
 Recordings/
-  interview.mp3
-  meeting.wav
+├── interview.mp3
+├── meeting.wav
+└── podcast.mp3
+
+        ↓ D-Noiser
 
 Recordings_enhanced/
-  interview_enhanced.wav
-  meeting_enhanced.wav
+├── interview_enhanced.wav
+├── meeting_enhanced.wav
+└── podcast_enhanced.wav
 ```
 
-With **Include subfolders**, the relative directory structure is preserved.
+## Requirements
 
-## Install
+* Python 3.9+
+* FFmpeg
+* DeepFilterNet3
+* PyTorch
 
-Use Python 3.10/3.11 in a virtual environment if possible.
+## Installation
+
+Clone the repository and create a virtual environment:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-# .venv\\Scripts\\activate    # Windows
+git clone <your-repository-url>
+cd D-Noiser
 
-python -m pip install --upgrade pip
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-DeepFilterNet's Python implementation is documented by the upstream project. It exposes `init_df()`, `load_audio()`, `enhance()`, and `save_audio()` for programmatic use.
+Make sure FFmpeg is installed and available on your PATH.
 
-## Run
+On macOS with Homebrew:
+
+```bash
+brew install ffmpeg
+```
+
+## Running D-Noiser
+
+Start the FastAPI application:
 
 ```bash
 uvicorn app:app --reload
 ```
 
-Then open:
+Then open the local URL shown by Uvicorn in your browser.
+
+## Usage
+
+### Enhance a folder
+
+Select a folder containing audio files.
+
+D-Noiser will process the supported audio files and create:
 
 ```text
-http://127.0.0.1:8000
+<original_folder>_enhanced/
 ```
 
-## Important: first run
+next to the original folder.
 
-The first enhancement initializes/downloads the model used by DeepFilterNet. Subsequent files in the same process reuse the loaded model.
+### Enhance a single file
 
-## Audio formats
+You can also provide:
 
-The service accepts common formats such as WAV, MP3, M4A, FLAC, OGG, OPUS, AAC and WMA, subject to the audio decoder available to the installed DeepFilterNet/torchaudio stack. Output is always WAV.
+* The complete input file path
+* The complete output file path
+* The output filename
+* Whether an existing output file should be overwritten
 
-If your environment has trouble decoding a particular format, convert it to WAV first or add FFmpeg/torchaudio support for that format.
+This is useful when you want precise control over where the enhanced recording is saved.
 
-## Architecture
+## Supported Audio Formats
+
+D-Noiser currently supports common audio formats including:
 
 ```text
-Browser
-   |
-   | folder path
-   v
-FastAPI
-   |
-   v
-AudioEnhancer service
-   |
-   +--> scan folder
-   |
-   +--> load DeepFilterNet once
-   |
-   +--> enhance each file
-   |
-   v
-<folder>_enhanced/*.wav
+.wav
+.mp3
+.m4a
+.flac
+.ogg
+.opus
+.aac
+.wma
 ```
 
-The service layer intentionally contains the DeepFilterNet logic so the API/UI can later be replaced without changing the enhancement code.
+FFmpeg is used to convert input audio into the format required for processing.
+
+## Privacy
+
+D-Noiser is designed to run locally.
+
+Your audio files are processed on your own machine and are not sent to a remote audio-processing service by D-Noiser.
+
+## Credits
+
+D-Noiser uses **DeepFilterNet3**, developed by:
+
+* Hendrik Schröter
+* Tobias Rosenkranz
+* Alberto N. Escalante-B.
+* Andreas Maier
+
+DeepFilterNet is an open-source project released under either the **MIT License** or **Apache License 2.0**, at the user's option.
+
+If you use D-Noiser in academic or research work, please also cite the original DeepFilterNet3 research paper.
+
+### DeepFilterNet3 Citation
+
+```bibtex
+@inproceedings{schroeter2023deepfilternet3,
+  title = {{DeepFilterNet}: Perceptually Motivated Real-Time Speech Enhancement},
+  author = {Schröter, Hendrik and Rosenkranz, Tobias and Escalante-B., Alberto N. and Maier, Andreas},
+  booktitle = {INTERSPEECH},
+  year = {2023},
+}
+```
+
+The DeepFilterNet project and its authors deserve credit for the underlying speech enhancement technology. D-Noiser is an independent application built around that technology.
+
+## License
+
+D-Noiser's application code is provided under the license specified in this repository.
+
+DeepFilterNet and its associated components remain subject to their respective original licenses. Please refer to the upstream DeepFilterNet project for the complete license terms.
+
+## Disclaimer
+
+D-Noiser is an independent project and is not affiliated with or endorsed by the DeepFilterNet authors.
