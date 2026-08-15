@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepFilterNet Audio Enhancer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">LOCAL AUDIO ENHANCEMENT</div>
+      <h1>DeepFilterNet<br><span>Audio Enhancer</span></h1>
+      <p>Choose a local folder and clean every supported audio file with DeepFilterNet.</p>
+    </section>
+
+    <section class="card">
+      <form id="enhance-form">
+        <label for="folder_path">Folder path</label>
+        <div class="path-row">
+          <input id="folder_path" name="folder_path" type="text"
+                 placeholder="/Users/you/Recordings or C:\\Users\\you\\Recordings"
+                 required>
+          <button type="submit" id="enhance-btn">Enhance folder</button>
+        </div>
+
+        <div class="options">
+          <label class="check">
+            <input id="recursive" type="checkbox">
+            <span>Include subfolders</span>
+          </label>
+          <label class="check">
+            <input id="overwrite" type="checkbox">
+            <span>Overwrite existing enhanced files</span>
+          </label>
+        </div>
+
+        <p class="hint">
+          Output is created beside the selected folder as <code>FOLDER_enhanced</code>.
+          Supported: {{ supported_extensions }}
+        </p>
+      </form>
+    </section>
+
+    <section class="status card hidden" id="status-card">
+      <div class="status-top">
+        <div>
+          <div class="eyebrow">PROCESSING</div>
+          <h2 id="status-title">Enhancing audio…</h2>
+        </div>
+        <div class="spinner" id="spinner"></div>
+      </div>
+      <div class="bar"><div id="bar-fill"></div></div>
+      <p id="status-text">Starting DeepFilterNet…</p>
+    </section>
+
+    <section class="result card hidden" id="result-card">
+      <div class="eyebrow">COMPLETE</div>
+      <h2 id="result-title">Done</h2>
+      <p id="output-folder"></p>
+      <div class="stats" id="stats"></div>
+      <details>
+        <summary>Processing details</summary>
+        <pre id="details"></pre>
+      </details>
+    </section>
+
+    <section class="note">
+      <strong>How it works</strong>
+      <span>Your browser only sends the folder path to this local FastAPI process. The audio stays on your machine.</span>
+    </section>
+  </main>
+
+<script>
+const form = document.getElementById('enhance-form');
+const button = document.getElementById('enhance-btn');
+const statusCard = document.getElementById('status-card');
+const resultCard = document.getElementById('result-card');
+const statusText = document.getElementById('status-text');
+const statusTitle = document.getElementById('status-title');
+const barFill = document.getElementById('bar-fill');
+const spinner = document.getElementById('spinner');
+const resultTitle = document.getElementById('result-title');
+const outputFolder = document.getElementById('output-folder');
+const stats = document.getElementById('stats');
+const details = document.getElementById('details');
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const folderPath = document.getElementById('folder_path').value.trim();
+  if (!folderPath) return;
+
+  button.disabled = true;
+  button.textContent = 'Enhancing…';
+  resultCard.classList.add('hidden');
+  statusCard.classList.remove('hidden');
+  spinner.classList.remove('hidden');
+  statusTitle.textContent = 'Enhancing audio…';
+  statusText.textContent = 'Loading DeepFilterNet and processing the folder. Large files may take a while.';
+  barFill.style.width = '15%';
+
+  try {
+    const response = await fetch('/api/enhance', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        folder_path: folderPath,
+        recursive: document.getElementById('recursive').checked,
+        overwrite: document.getElementById('overwrite').checked,
+      }),
+    });
+
+    barFill.style.width = '100%';
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || 'Enhancement failed.');
+    }
+
+    spinner.classList.add('hidden');
+    statusTitle.textContent = 'Finished';
+    statusText.textContent = `${data.processed} file(s) enhanced.`;
+
+    resultCard.classList.remove('hidden');
+    resultTitle.textContent = data.failed ? 'Finished with errors' : 'All done';
+    outputFolder.textContent = `Output: ${data.output_folder}`;
+    stats.innerHTML = `
+      <div><b>${data.total}</b><span>found</span></div>
+      <div><b>${data.processed}</b><span>enhanced</span></div>
+      <div><b>${data.skipped}</b><span>skipped</span></div>
+      <div><b>${data.failed}</b><span>failed</span></div>`;
+    details.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    spinner.classList.add('hidden');
+    statusTitle.textContent = 'Something went wrong';
+    statusText.textContent = error.message;
+    barFill.style.width = '100%';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Enhance folder';
+  }
+});
+</script>
+</body>
+</html>
