@@ -4,6 +4,13 @@ A simple local audio denoising application powered by **DeepFilterNet3**.
 
 D-Noiser lets you clean up audio files directly on your machine without uploading your recordings to a cloud service.
 
+## Results
+* Original
+[original.wav](https://github.com/user-attachments/files/31094922/original.wav)
+* Enhanced
+[enhanced.wav](https://github.com/user-attachments/files/31094928/enhanced.wav)
+
+
 ## Features
 
 * 🎙️ Denoise individual audio files
