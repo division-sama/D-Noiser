@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
-
-import numpy as np
-import soundfile as sf
-import torch
-
 
 SUPPORTED_EXTENSIONS = {
     ".wav",
@@ -23,11 +16,21 @@ SUPPORTED_EXTENSIONS = {
 
 
 class AudioEnhancer:
-    """Application service around DeepFilterNet."""
+    """Application service around DeepFilterNet.
+
+    The model is loaded once per application process and then reused for every
+    file in a batch. DeepFilterNet's Python API handles the resampling needed
+    for the model's 48 kHz processing pipeline.
+    """
 
     def __init__(self) -> None:
         self._model = None
         self._df_state = None
+        self._device = None
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._model is not None
 
     def _load_model(self) -> None:
         if self._model is not None:
@@ -35,109 +38,73 @@ class AudioEnhancer:
 
         from df.enhance import init_df
 
-        self._model, self._df_state, _ = init_df()
+        self._model, self._df_state, self._device = init_df()
 
-    def _convert_to_wav(
-        self,
-        input_path: Path,
-        output_path: Path,
-    ) -> None:
-        """Convert input audio to mono 48 kHz PCM WAV using FFmpeg."""
-
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(input_path),
-                "-ar",
-                str(self._df_state.sr()),
-                "-ac",
-                "1",
-                "-c:a",
-                "pcm_s16le",
-                str(output_path),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-    def _load_wav(self, wav_path: Path) -> torch.Tensor:
-        """Load WAV using soundfile instead of torchaudio."""
-
-        audio, sample_rate = sf.read(
-            str(wav_path),
-            dtype="float32",
-        )
-
-        if sample_rate != self._df_state.sr():
-            raise ValueError(
-                f"Expected {self._df_state.sr()} Hz audio, "
-                f"got {sample_rate} Hz"
-            )
-
-        # If soundfile returns stereo/multi-channel,
-        # convert to mono.
-        if audio.ndim == 2:
-            audio = np.mean(audio, axis=1)
-
-        # soundfile gives us:
-        # (samples,)
-        #
-        # DeepFilterNet expects:
-        # (channels, samples)
-        audio = torch.from_numpy(audio).unsqueeze(0)
-
-        return audio
-
-    def enhance_file(
-        self,
-        input_path: Path,
-        output_path: Path,
-    ) -> dict[str, Any]:
-
-        from df.enhance import enhance, save_audio
+    def enhance_file(self, input_path: Path, output_path: Path) -> dict[str, Any]:
+        """Enhance one audio file and write a WAV result."""
+        from df.enhance import enhance, load_audio, save_audio
 
         self._load_model()
 
-        output_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-
-            temp_wav = Path(temp_dir) / "input.wav"
-
-            # MP3/M4A/etc → 48 kHz mono WAV
-            self._convert_to_wav(
-                input_path,
-                temp_wav,
-            )
-
-            # WAV → torch tensor
-            audio = self._load_wav(temp_wav)
-
-            # Run DeepFilterNet.
-            enhanced = enhance(
-                self._model,
-                self._df_state,
-                audio,
-            )
-
-            # Save enhanced audio.
-            save_audio(
-                str(output_path),
-                enhanced,
-                self._df_state.sr(),
-            )
+        audio, _ = load_audio(str(input_path), sr=self._df_state.sr())
+        enhanced = enhance(self._model, self._df_state, audio)
+        save_audio(str(output_path), enhanced, self._df_state.sr())
 
         return {
             "input": str(input_path),
             "output": str(output_path),
         }
+
+    def enhance_single_file(
+        self,
+        input_file: str,
+        output_file: str,
+        *,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Enhance exactly one audio file to the exact output path supplied."""
+        input_path = Path(input_file).expanduser().resolve()
+        output_path = Path(output_file).expanduser().resolve()
+
+        if not input_path.exists():
+            raise ValueError(f"Input file does not exist: {input_path}")
+        if not input_path.is_file():
+            raise ValueError(f"Input path is not a file: {input_path}")
+        if input_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            raise ValueError(
+                f"Unsupported input format: {input_path.suffix or '[no extension]'}"
+            )
+        if output_path.suffix.lower() != ".wav":
+            raise ValueError(
+                "DeepFilterNet output must be a WAV file. "
+                "Please use an output filename ending in .wav."
+            )
+        if output_path.exists() and not overwrite:
+            raise ValueError(
+                f"Output file already exists: {output_path}. "
+                "Enable overwrite to replace it."
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            result = self.enhance_file(input_path, output_path)
+            result["status"] = "done"
+            return {
+                "ok": True,
+                "input": str(input_path),
+                "output": str(output_path),
+                "result": result,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "input": str(input_path),
+                "output": str(output_path),
+                "error": str(exc),
+            }
 
     def enhance_folder(
         self,
@@ -146,105 +113,65 @@ class AudioEnhancer:
         recursive: bool = False,
         overwrite: bool = False,
     ) -> dict[str, Any]:
-
         source = Path(folder_path).expanduser().resolve()
 
         if not source.exists():
-            raise ValueError(
-                f"Folder does not exist: {source}"
-            )
-
+            raise ValueError(f"Folder does not exist: {source}")
         if not source.is_dir():
-            raise ValueError(
-                f"Path is not a folder: {source}"
-            )
+            raise ValueError(f"Path is not a folder: {source}")
 
-        output_dir = (
-            source.parent /
-            f"{source.name}_enhanced"
-        )
+        # The result is a sibling folder: /recordings -> /recordings_enhanced
+        output_dir = source.parent / f"{source.name}_enhanced"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        output_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        iterator = (
-            source.rglob("*")
-            if recursive
-            else source.glob("*")
-        )
-
+        iterator = source.rglob("*") if recursive else source.glob("*")
         files = [
-            p
-            for p in iterator
-            if p.is_file()
-            and p.suffix.lower() in SUPPORTED_EXTENSIONS
+            p for p in iterator
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ]
+
+        # Never process a previous output directory if it happens to be nested.
+        files = [p for p in files if output_dir not in p.parents]
 
         results: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
 
         for input_path in sorted(files):
-
+            # Always emit WAV. This makes output deterministic and avoids
+            # codec-specific issues when writing enhanced audio.
             if recursive:
-                relative_parent = (
-                    input_path.parent.relative_to(source)
-                )
-
-                target_dir = (
-                    output_dir / relative_parent
-                )
+                relative_parent = input_path.parent.relative_to(source)
+                target_dir = output_dir / relative_parent
             else:
                 target_dir = output_dir
 
-            output_path = (
-                target_dir /
-                f"{input_path.stem}_enhanced.wav"
-            )
+            output_path = target_dir / f"{input_path.stem}_enhanced.wav"
 
             if output_path.exists() and not overwrite:
-                results.append(
-                    {
-                        "input": str(input_path),
-                        "output": str(output_path),
-                        "status": "skipped",
-                    }
-                )
+                results.append({
+                    "input": str(input_path),
+                    "output": str(output_path),
+                    "status": "skipped",
+                })
                 continue
 
             try:
-                result = self.enhance_file(
-                    input_path,
-                    output_path,
-                )
-
-                result["status"] = "done"
-                results.append(result)
-
+                item = self.enhance_file(input_path, output_path)
+                item["status"] = "done"
+                results.append(item)
             except Exception as exc:
-                errors.append(
-                    {
-                        "input": str(input_path),
-                        "error": str(exc),
-                    }
-                )
+                errors.append({
+                    "input": str(input_path),
+                    "error": str(exc),
+                })
 
         return {
             "ok": len(errors) == 0,
             "source_folder": str(source),
             "output_folder": str(output_dir),
             "total": len(files),
-            "processed": sum(
-                1
-                for item in results
-                if item["status"] == "done"
-            ),
-            "skipped": sum(
-                1
-                for item in results
-                if item["status"] == "skipped"
-            ),
+            "processed": sum(1 for x in results if x["status"] == "done"),
+            "skipped": sum(1 for x in results if x["status"] == "skipped"),
             "failed": len(errors),
             "results": results,
             "errors": errors,

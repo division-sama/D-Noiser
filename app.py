@@ -3,7 +3,6 @@ from typing import Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -16,16 +15,15 @@ enhancer = AudioEnhancer()
 
 app = FastAPI(title="Local DeepFilterNet Audio Enhancer")
 
-app.mount(
-    "/static",
-    StaticFiles(directory="static"),
-    name="static",
-)
-
 
 class EnhanceRequest(BaseModel):
     folder_path: str
     recursive: bool = False
+    overwrite: bool = False
+
+class EnhanceSingleRequest(BaseModel):
+    input_file: str
+    output_file: str
     overwrite: bool = False
 
 
@@ -49,6 +47,22 @@ async def enhance_folder(payload: EnhanceRequest):
             overwrite=payload.overwrite,
         )
         return JSONResponse(result)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/enhance-single")
+async def enhance_single(payload: EnhanceSingleRequest):
+    try:
+        result = enhancer.enhance_single_file(
+            payload.input_file,
+            payload.output_file,
+            overwrite=payload.overwrite,
+        )
+        status_code = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=status_code)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     except Exception as exc:
