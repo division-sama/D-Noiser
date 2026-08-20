@@ -2,7 +2,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -14,6 +15,12 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 enhancer = AudioEnhancer()
 
 app = FastAPI(title="Local DeepFilterNet Audio Enhancer")
+
+app.mount(
+    "/static",
+    StaticFiles(directory="static"),
+    name="static",
+)
 
 
 class EnhanceRequest(BaseModel):
@@ -91,3 +98,8 @@ async def enhance_folder_form(
 @app.get("/api/health")
 async def health():
     return {"ok": True, "model_loaded": enhancer.is_loaded}
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(BASE_DIR / "static" / "favicon.ico")
